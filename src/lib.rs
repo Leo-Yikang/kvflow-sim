@@ -5,6 +5,7 @@
 //! and object-level transfer estimates. A full serving runner can be built on
 //! top of these primitives without committing to packet-level network events.
 
+pub mod decision;
 pub mod error;
 pub mod model;
 pub mod serving;
