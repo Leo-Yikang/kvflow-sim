@@ -7,6 +7,7 @@
 
 pub mod error;
 pub mod model;
+pub mod serving;
 pub mod trace;
 pub mod transfer;
 
