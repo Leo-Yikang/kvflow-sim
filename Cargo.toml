@@ -1,0 +1,14 @@
+[package]
+name = "kvflow-sim"
+version = "0.1.0"
+edition = "2024"
+description = "Trace-driven simulator for KV-cache placement and data movement in disaggregated LLM serving."
+license = "MIT"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.10"
