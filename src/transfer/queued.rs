@@ -1,32 +1,15 @@
 use crate::error::{KvFlowError, Result};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TransferPath {
-    LocalGpuToGpu,
-    LocalCpuToGpu,
-    RemoteMemoryToGpu,
-    RemoteSsdToGpu,
-}
+use super::{TransferEstimate, TransferPath};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TransferEstimate {
-    pub path: TransferPath,
-    pub bytes: u64,
-    pub start_ns: u64,
-    pub finish_ns: u64,
-    pub base_latency_ns: u64,
-    pub serialization_ns: u64,
-    pub bandwidth_bps: u64,
-}
-
-impl TransferEstimate {
-    pub fn duration_ns(&self) -> u64 {
-        self.finish_ns.saturating_sub(self.start_ns)
-    }
-}
-
+/// A transfer model that adds queueing delay for remote paths by tracking
+/// NIC busy state.
+///
+/// Local transfers (GPU↔GPU, CPU↔GPU) are assumed to have dedicated
+/// interconnects and do not queue.  Remote transfers share a NIC that
+/// serialises concurrent transfers.
 #[derive(Debug, Clone)]
-pub struct AnalyticalTransferModel {
+pub struct QueuedTransferModel {
     pub local_gpu_bps: u64,
     pub local_cpu_bps: u64,
     pub remote_memory_bps: u64,
@@ -35,9 +18,11 @@ pub struct AnalyticalTransferModel {
     pub local_cpu_base_ns: u64,
     pub remote_memory_base_ns: u64,
     pub remote_ssd_base_ns: u64,
+    /// Time until which the shared remote NIC is busy.
+    pub nic_busy_until_ns: u64,
 }
 
-impl AnalyticalTransferModel {
+impl QueuedTransferModel {
     pub fn rdma_400g() -> Self {
         Self {
             local_gpu_bps: 900_000_000_000,
@@ -48,11 +33,12 @@ impl AnalyticalTransferModel {
             local_cpu_base_ns: 2_000,
             remote_memory_base_ns: 8_000,
             remote_ssd_base_ns: 80_000,
+            nic_busy_until_ns: 0,
         }
     }
 
     pub fn estimate(
-        &self,
+        &mut self,
         now_ns: u64,
         path: TransferPath,
         bytes: u64,
@@ -71,20 +57,37 @@ impl AnalyticalTransferModel {
         }
 
         let serialization_ns = serialization_ns(bytes, bandwidth_bps);
-        let finish_ns = now_ns
+
+        // Remote paths may queue behind the shared NIC.
+        let start_ns = if is_remote(path) {
+            let start = now_ns.max(self.nic_busy_until_ns);
+            self.nic_busy_until_ns = start.saturating_add(serialization_ns);
+            start
+        } else {
+            now_ns
+        };
+
+        let finish_ns = start_ns
             .saturating_add(base_latency_ns)
             .saturating_add(serialization_ns);
 
         Ok(TransferEstimate {
             path,
             bytes,
-            start_ns: now_ns,
+            start_ns,
             finish_ns,
             base_latency_ns,
             serialization_ns,
             bandwidth_bps,
         })
     }
+}
+
+fn is_remote(path: TransferPath) -> bool {
+    matches!(
+        path,
+        TransferPath::RemoteMemoryToGpu | TransferPath::RemoteSsdToGpu
+    )
 }
 
 fn serialization_ns(bytes: u64, bandwidth_bps: u64) -> u64 {
@@ -100,25 +103,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn estimate_remote_memory_transfer() {
-        let model = AnalyticalTransferModel::rdma_400g();
-        let est = model
+    fn remote_transfers_queue_when_nic_busy() {
+        let mut model = QueuedTransferModel::rdma_400g();
+        let est1 = model
             .estimate(0, TransferPath::RemoteMemoryToGpu, 400_000_000)
             .unwrap();
+        // First transfer starts immediately.
+        assert_eq!(est1.start_ns, 0);
 
-        assert_eq!(est.serialization_ns, 8_000_000);
-        assert_eq!(est.duration_ns(), 8_008_000);
+        let est2 = model
+            .estimate(0, TransferPath::RemoteMemoryToGpu, 400_000_000)
+            .unwrap();
+        // Second transfer queues behind the first.
+        assert_eq!(est2.start_ns, est1.serialization_ns);
+        assert!(est2.finish_ns > est1.finish_ns);
     }
 
     #[test]
-    fn large_kv_transfer_does_not_overflow_u64_intermediate() {
-        let model = AnalyticalTransferModel::rdma_400g();
-        let four_gib = 4 * 1024 * 1024 * 1024_u64;
-        let est = model
-            .estimate(0, TransferPath::RemoteMemoryToGpu, four_gib)
+    fn local_transfers_do_not_queue() {
+        let mut model = QueuedTransferModel::rdma_400g();
+        let est1 = model
+            .estimate(0, TransferPath::LocalCpuToGpu, 400_000_000)
             .unwrap();
-
-        assert_eq!(est.serialization_ns, 85_899_345);
-        assert_eq!(est.duration_ns(), 85_907_345);
+        let est2 = model
+            .estimate(0, TransferPath::LocalCpuToGpu, 400_000_000)
+            .unwrap();
+        // Both start at 0 because local paths do not share the remote NIC.
+        assert_eq!(est1.start_ns, 0);
+        assert_eq!(est2.start_ns, 0);
     }
 }

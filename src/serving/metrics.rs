@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+
+use crate::trace::LlmRequest;
+
 use super::runner::RequestResult;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,6 +42,8 @@ pub struct ServingSummary {
     pub ttft: LatencyStats,
     pub tbt: LatencyStats,
     pub jct: LatencyStats,
+    pub slo_violations_ttft: usize,
+    pub slo_violations_tbt: usize,
 }
 
 impl ServingSummary {
@@ -63,7 +69,44 @@ impl ServingSummary {
             ttft: LatencyStats::from_values(&mut ttft).unwrap(),
             tbt: LatencyStats::from_values(&mut tbt).unwrap(),
             jct: LatencyStats::from_values(&mut jct).unwrap(),
+            slo_violations_ttft: 0,
+            slo_violations_tbt: 0,
         })
+    }
+
+    pub fn from_results_with_slos(
+        results: &[RequestResult],
+        requests: &[LlmRequest],
+    ) -> Option<Self> {
+        let mut summary = Self::from_results(results)?;
+        summary.apply_slos(results, requests)?;
+        Some(summary)
+    }
+
+    pub fn apply_slos(&mut self, results: &[RequestResult], requests: &[LlmRequest]) -> Option<()> {
+        let results_by_id: HashMap<u64, &RequestResult> = results
+            .iter()
+            .map(|result| (result.request_id, result))
+            .collect();
+
+        self.slo_violations_ttft = 0;
+        self.slo_violations_tbt = 0;
+
+        for req in requests {
+            let result = results_by_id.get(&req.request_id)?;
+            if let Some(slo) = req.slo_ttft_ns {
+                if result.ttft_ns() > slo {
+                    self.slo_violations_ttft = self.slo_violations_ttft.saturating_add(1);
+                }
+            }
+            if let Some(slo) = req.slo_tbt_ns {
+                if result.mean_tbt_ns() > slo {
+                    self.slo_violations_tbt = self.slo_violations_tbt.saturating_add(1);
+                }
+            }
+        }
+
+        Some(())
     }
 }
 

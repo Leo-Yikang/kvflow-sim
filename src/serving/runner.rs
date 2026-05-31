@@ -89,7 +89,7 @@ impl<C: ComputeModel> NoReuseRunner<C> {
 
     pub fn run_summary(&mut self, requests: &[LlmRequest]) -> Option<ServingSummary> {
         let results = self.run(requests);
-        ServingSummary::from_results(&results)
+        ServingSummary::from_results_with_slos(&results, requests)
     }
 
     fn run_one(&mut self, req: &LlmRequest) -> RequestResult {
@@ -165,5 +165,34 @@ mod tests {
         assert_eq!(summary.total_output_tokens, 16);
         assert!(summary.ttft.p50_ns > 0);
         assert!(summary.jct.p99_ns >= summary.ttft.p99_ns);
+    }
+
+    #[test]
+    fn no_reuse_runner_counts_slo_violations() {
+        let requests = vec![LlmRequest {
+            request_id: 1,
+            session_id: 1,
+            turn_id: 0,
+            arrival_ns: 0,
+            prompt_tokens: 1024,
+            new_prompt_tokens: 1024,
+            output_tokens: 4,
+            model_id: "llama-8b".to_string(),
+            slo_ttft_ns: Some(1),
+            slo_tbt_ns: Some(1),
+        }];
+        let mut runner = NoReuseRunner::new(
+            ServingConfig {
+                prefill_workers: 1,
+                decode_workers: 1,
+                decode_batch_size: 1,
+            },
+            LinearComputeModel::conservative_8b(),
+        );
+
+        let summary = runner.run_summary(&requests).unwrap();
+
+        assert_eq!(summary.slo_violations_ttft, 1);
+        assert_eq!(summary.slo_violations_tbt, 1);
     }
 }
