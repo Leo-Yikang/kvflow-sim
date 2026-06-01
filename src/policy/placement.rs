@@ -1,5 +1,7 @@
 use crate::cache::{CacheLocation, CacheState};
 use crate::cluster::ClusterTopology;
+use crate::model::ComputeModel;
+use crate::transfer::TransferModel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EvictedKv {
@@ -8,8 +10,13 @@ pub struct EvictedKv {
 }
 
 /// Decides where a newly-computed KV object should be stored.
+#[allow(clippy::too_many_arguments)]
 pub trait PlacementPolicy {
     /// Called after prefill completes.
+    ///
+    /// `compute` and `transfer` are passed in so utility-based policies can
+    /// score the cost of placing the KV at each tier. Policies that do not
+    /// care about per-tier utility may simply ignore them.
     ///
     /// Returns the chosen `CacheLocation` and any objects evicted to make room.
     fn place(
@@ -21,5 +28,7 @@ pub trait PlacementPolicy {
         now_ns: u64,
         cluster: &ClusterTopology,
         cache: &mut CacheState,
+        compute: &dyn ComputeModel,
+        transfer: &mut dyn TransferModel,
     ) -> crate::Result<(CacheLocation, Vec<EvictedKv>)>;
 }

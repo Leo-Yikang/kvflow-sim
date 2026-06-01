@@ -19,6 +19,8 @@ impl PlacementPolicy for RemoteLru {
         now_ns: u64,
         _cluster: &ClusterTopology,
         cache: &mut CacheState,
+        _compute: &dyn crate::model::ComputeModel,
+        _transfer: &mut dyn crate::transfer::TransferModel,
     ) -> crate::Result<(CacheLocation, Vec<EvictedKv>)> {
         let mut evicted = Vec::new();
         let loc = CacheLocation::RemoteMemory {
@@ -79,6 +81,8 @@ impl PlacementPolicy for SizeAware {
         now_ns: u64,
         _cluster: &ClusterTopology,
         cache: &mut CacheState,
+        _compute: &dyn crate::model::ComputeModel,
+        _transfer: &mut dyn crate::transfer::TransferModel,
     ) -> crate::Result<(CacheLocation, Vec<EvictedKv>)> {
         let mut evicted = Vec::new();
         let tier = if bytes <= self.gpu_threshold_bytes {

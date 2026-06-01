@@ -81,6 +81,34 @@ impl QueuedTransferModel {
             bandwidth_bps,
         })
     }
+
+    /// Stateless duration estimate. Identical to `AnalyticalTransferModel`'s
+    /// duration: queueing only delays the *start* time, not the transfer's
+    /// own duration. Crucially this MUST NOT advance `nic_busy_until_ns` —
+    /// placement scoring is called once per prefill completion and the
+    /// runner then immediately calls `estimate` for the next real fetch,
+    /// which would otherwise see a polluted start time.
+    pub fn estimate_duration(
+        &self,
+        path: TransferPath,
+        bytes: u64,
+    ) -> Result<u64> {
+        let (bandwidth_bps, base_latency_ns) = match path {
+            TransferPath::LocalGpuToGpu => (self.local_gpu_bps, self.local_gpu_base_ns),
+            TransferPath::LocalCpuToGpu => (self.local_cpu_bps, self.local_cpu_base_ns),
+            TransferPath::RemoteMemoryToGpu => (self.remote_memory_bps, self.remote_memory_base_ns),
+            TransferPath::RemoteSsdToGpu => (self.remote_ssd_bps, self.remote_ssd_base_ns),
+        };
+
+        if bandwidth_bps == 0 {
+            return Err(KvFlowError::InvalidTransferModel(
+                "bandwidth must be positive".to_string(),
+            ));
+        }
+
+        let serialization_ns = serialization_ns(bytes, bandwidth_bps);
+        Ok(base_latency_ns.saturating_add(serialization_ns))
+    }
 }
 
 fn is_remote(path: TransferPath) -> bool {
@@ -131,5 +159,40 @@ mod tests {
         // Both start at 0 because local paths do not share the remote NIC.
         assert_eq!(est1.start_ns, 0);
         assert_eq!(est2.start_ns, 0);
+    }
+
+    #[test]
+    fn estimate_duration_does_not_advance_nic_busy_state() {
+        // Regression: NetworkAwarePlacement calls a transfer model many
+        // times per placement to score candidate tiers. The stateful
+        // `estimate` would advance `nic_busy_until_ns` and skew the next
+        // real fetch's start time. `estimate_duration` must be stateless.
+        let model = QueuedTransferModel::rdma_400g();
+        assert_eq!(model.nic_busy_until_ns, 0);
+
+        // Score all three remote-relevant tiers with a non-trivial payload.
+        let d_cpu = model
+            .estimate_duration(TransferPath::LocalCpuToGpu, 64 * 1024)
+            .unwrap();
+        let d_mem = model
+            .estimate_duration(TransferPath::RemoteMemoryToGpu, 64 * 1024)
+            .unwrap();
+        let d_ssd = model
+            .estimate_duration(TransferPath::RemoteSsdToGpu, 64 * 1024)
+            .unwrap();
+
+        // All three return a finite duration (the serialization +
+        // base-latency, not infinity).
+        assert!(d_cpu > 0);
+        assert!(d_mem > 0);
+        assert!(d_ssd > 0);
+
+        // Critical: the state must be unchanged. Any advance here would
+        // mean the placement's "what-if" call is leaking into subsequent
+        // real fetches.
+        assert_eq!(
+            model.nic_busy_until_ns, 0,
+            "estimate_duration must not mutate nic_busy_until_ns"
+        );
     }
 }

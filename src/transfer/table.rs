@@ -46,6 +46,23 @@ impl TableCalibratedTransferModel {
             self.fallback.estimate(now_ns, path, bytes)
         }
     }
+
+    /// Stateless duration estimate. Mirrors `estimate` but takes `&self`
+    /// and skips the fallback's potential side effects (the fallback is an
+    /// `AnalyticalTransferModel` today, which is already stateless, but we
+    /// route through `estimate_duration` so future fallback changes cannot
+    /// leak state here).
+    pub fn estimate_duration(
+        &self,
+        path: TransferPath,
+        bytes: u64,
+    ) -> Result<u64> {
+        if let Some(&latency_ns) = self.table.get(&(path, bytes)) {
+            Ok(latency_ns)
+        } else {
+            self.fallback.estimate_duration(path, bytes)
+        }
+    }
 }
 
 #[cfg(test)]

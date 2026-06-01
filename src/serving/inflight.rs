@@ -1,3 +1,4 @@
+use crate::cache::TierKind;
 use crate::cluster::NodeId;
 use crate::trace::LlmRequest;
 
@@ -17,6 +18,12 @@ pub(crate) struct InFlightRequest {
     pub decode_node: Option<NodeId>,
     pub decode_gpu: Option<usize>,
     pub prefill_tokens: u32,
+    /// If `Some(t)`, this request is in the middle of fetching a reusable
+    /// KV from tier `t` to local GPU. The hit counter (`hits_cpu` /
+    /// `hits_remote`) is only credited once `on_fetch_done` confirms the
+    /// transfer succeeded; if the fetch is degraded to a full prefill, the
+    /// hit is *not* credited (only `misses`).
+    pub pending_fetch_tier: Option<TierKind>,
 }
 
 impl InFlightRequest {
@@ -33,6 +40,7 @@ impl InFlightRequest {
             decode_node: None,
             decode_gpu: None,
             prefill_tokens: 0,
+            pending_fetch_tier: None,
         }
     }
 

@@ -22,6 +22,8 @@ impl PlacementPolicy for LocalGpuLru {
         now_ns: u64,
         cluster: &ClusterTopology,
         cache: &mut CacheState,
+        _compute: &dyn crate::model::ComputeModel,
+        _transfer: &mut dyn crate::transfer::TransferModel,
     ) -> crate::Result<(CacheLocation, Vec<EvictedKv>)> {
         let mut evicted = Vec::new();
 
