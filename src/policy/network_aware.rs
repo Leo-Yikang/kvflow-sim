@@ -203,8 +203,8 @@ mod tests {
             0,
             gpus,
             1,
-            1_000_000_000,         // 1 GiB CPU
-            10_000_000_000_000,    // 10 TiB local SSD (capacity only)
+            1_000_000_000,      // 1 GiB CPU
+            10_000_000_000_000, // 10 TiB local SSD (capacity only)
         )])
     }
 
@@ -218,17 +218,7 @@ mod tests {
         transfer: &mut dyn TransferModel,
     ) -> CacheLocation {
         let (loc, _evicted) = policy
-            .place(
-                kv_id,
-                0,
-                1024,
-                bytes,
-                0,
-                cluster,
-                cache,
-                compute,
-                transfer,
-            )
+            .place(kv_id, 0, 1024, bytes, 0, cluster, cache, compute, transfer)
             .expect("placement should succeed");
         loc
     }
@@ -250,7 +240,15 @@ mod tests {
         let compute = LinearComputeModel::conservative_8b();
 
         // 64 KiB fits comfortably in the 1 MiB GPU tier.
-        let loc = place_kv(&mut policy, &cluster, &mut cache, 1, 64 * 1024, &compute, &mut transfer);
+        let loc = place_kv(
+            &mut policy,
+            &cluster,
+            &mut cache,
+            1,
+            64 * 1024,
+            &compute,
+            &mut transfer,
+        );
         assert!(loc.is_gpu(), "expected GPU placement, got {:?}", loc);
     }
 
@@ -329,20 +327,8 @@ mod tests {
         let transfer = AnalyticalTransferModel::rdma_400g();
 
         // Tiny recompute (4 tokens): GPU wins by a wide margin.
-        let gpu_small = policy.utility_for_tier(
-            TierKind::Gpu,
-            1024,
-            4,
-            &compute,
-            &transfer,
-        );
-        let cpu_small = policy.utility_for_tier(
-            TierKind::Cpu,
-            1024,
-            4,
-            &compute,
-            &transfer,
-        );
+        let gpu_small = policy.utility_for_tier(TierKind::Gpu, 1024, 4, &compute, &transfer);
+        let cpu_small = policy.utility_for_tier(TierKind::Cpu, 1024, 4, &compute, &transfer);
         assert!(
             gpu_small > cpu_small,
             "GPU utility ({}) should beat CPU utility ({}) for tiny recompute",
@@ -352,20 +338,10 @@ mod tests {
 
         // Larger KV + longer recompute: the relative gap narrows but GPU
         // should still be the best (since fetch cost grows with bytes too).
-        let gpu_large = policy.utility_for_tier(
-            TierKind::Gpu,
-            64 * 1024 * 1024,
-            4096,
-            &compute,
-            &transfer,
-        );
-        let cpu_large = policy.utility_for_tier(
-            TierKind::Cpu,
-            64 * 1024 * 1024,
-            4096,
-            &compute,
-            &transfer,
-        );
+        let gpu_large =
+            policy.utility_for_tier(TierKind::Gpu, 64 * 1024 * 1024, 4096, &compute, &transfer);
+        let cpu_large =
+            policy.utility_for_tier(TierKind::Cpu, 64 * 1024 * 1024, 4096, &compute, &transfer);
         assert!(gpu_large > cpu_large);
     }
 
@@ -419,9 +395,18 @@ mod tests {
 
         // Pre-populated CPU objects must still be there (short-circuit
         // prevented destructive eviction).
-        assert!(cache.lookup(100, 100).is_some(), "session 100 evicted from CPU");
-        assert!(cache.lookup(101, 101).is_some(), "session 101 evicted from CPU");
-        assert!(cache.lookup(102, 102).is_some(), "session 102 evicted from CPU");
+        assert!(
+            cache.lookup(100, 100).is_some(),
+            "session 100 evicted from CPU"
+        );
+        assert!(
+            cache.lookup(101, 101).is_some(),
+            "session 101 evicted from CPU"
+        );
+        assert!(
+            cache.lookup(102, 102).is_some(),
+            "session 102 evicted from CPU"
+        );
 
         // Placement went to remote (the only tier that could hold 2 MiB).
         assert!(

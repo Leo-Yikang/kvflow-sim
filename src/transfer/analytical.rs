@@ -77,20 +77,13 @@ impl AnalyticalTransferModel {
     /// Stateless duration estimate. Mirrors `estimate` but takes `&self` and
     /// does not return a full `TransferEstimate` (only the total duration).
     /// Useful for placement-time "what-if" scoring.
-    pub fn estimate_duration(
-        &self,
-        path: TransferPath,
-        bytes: u64,
-    ) -> Result<u64> {
+    pub fn estimate_duration(&self, path: TransferPath, bytes: u64) -> Result<u64> {
         let (bandwidth_bps, base_latency_ns) = self.bandwidth_and_latency(path)?;
         let serialization_ns = serialization_ns(bytes, bandwidth_bps);
         Ok(base_latency_ns.saturating_add(serialization_ns))
     }
 
-    fn bandwidth_and_latency(
-        &self,
-        path: TransferPath,
-    ) -> Result<(u64, u64)> {
+    fn bandwidth_and_latency(&self, path: TransferPath) -> Result<(u64, u64)> {
         let (bandwidth_bps, base_latency_ns) = match path {
             TransferPath::LocalGpuToGpu => (self.local_gpu_bps, self.local_gpu_base_ns),
             TransferPath::LocalCpuToGpu => (self.local_cpu_bps, self.local_cpu_base_ns),

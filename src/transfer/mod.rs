@@ -29,11 +29,7 @@ pub trait TransferModel {
     ///
     /// The duration is invariant in `now_ns` for both analytical and
     /// queued models, so `now_ns` is intentionally not a parameter.
-    fn estimate_duration(
-        &self,
-        path: TransferPath,
-        bytes: u64,
-    ) -> crate::Result<u64>;
+    fn estimate_duration(&self, path: TransferPath, bytes: u64) -> crate::Result<u64>;
 }
 
 impl TransferModel for AnalyticalTransferModel {
@@ -46,11 +42,7 @@ impl TransferModel for AnalyticalTransferModel {
         AnalyticalTransferModel::estimate(self, now_ns, path, bytes)
     }
 
-    fn estimate_duration(
-        &self,
-        path: TransferPath,
-        bytes: u64,
-    ) -> crate::Result<u64> {
+    fn estimate_duration(&self, path: TransferPath, bytes: u64) -> crate::Result<u64> {
         AnalyticalTransferModel::estimate_duration(self, path, bytes)
     }
 }
@@ -65,11 +57,7 @@ impl TransferModel for QueuedTransferModel {
         QueuedTransferModel::estimate(self, now_ns, path, bytes)
     }
 
-    fn estimate_duration(
-        &self,
-        path: TransferPath,
-        bytes: u64,
-    ) -> crate::Result<u64> {
+    fn estimate_duration(&self, path: TransferPath, bytes: u64) -> crate::Result<u64> {
         QueuedTransferModel::estimate_duration(self, path, bytes)
     }
 }
@@ -84,11 +72,7 @@ impl TransferModel for TableCalibratedTransferModel {
         TableCalibratedTransferModel::estimate(self, now_ns, path, bytes)
     }
 
-    fn estimate_duration(
-        &self,
-        path: TransferPath,
-        bytes: u64,
-    ) -> crate::Result<u64> {
+    fn estimate_duration(&self, path: TransferPath, bytes: u64) -> crate::Result<u64> {
         TableCalibratedTransferModel::estimate_duration(self, path, bytes)
     }
 }

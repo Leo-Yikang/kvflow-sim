@@ -52,11 +52,7 @@ impl TableCalibratedTransferModel {
     /// `AnalyticalTransferModel` today, which is already stateless, but we
     /// route through `estimate_duration` so future fallback changes cannot
     /// leak state here).
-    pub fn estimate_duration(
-        &self,
-        path: TransferPath,
-        bytes: u64,
-    ) -> Result<u64> {
+    pub fn estimate_duration(&self, path: TransferPath, bytes: u64) -> Result<u64> {
         if let Some(&latency_ns) = self.table.get(&(path, bytes)) {
             Ok(latency_ns)
         } else {

@@ -328,9 +328,7 @@ impl<C: ComputeModel, P: PlacementPolicy, T: TransferModel> CacheAwareRunner<C, 
         };
         let prompt_tokens = inflight.request.prompt_tokens;
         inflight.prefill_tokens = prompt_tokens;
-        self.recomputed_tokens = self
-            .recomputed_tokens
-            .saturating_add(prompt_tokens as u64);
+        self.recomputed_tokens = self.recomputed_tokens.saturating_add(prompt_tokens as u64);
 
         if let Some((node_id, gpu_idx)) =
             self.cluster.find_idle_gpu_for(now_ns, WorkerRole::Prefill)
@@ -422,8 +420,7 @@ impl<C: ComputeModel, P: PlacementPolicy, T: TransferModel> CacheAwareRunner<C, 
                 ) {
                     Ok((_loc, evicted)) => {
                         for evicted in &evicted {
-                            self.evicted_bytes =
-                                self.evicted_bytes.saturating_add(evicted.bytes);
+                            self.evicted_bytes = self.evicted_bytes.saturating_add(evicted.bytes);
                         }
                     }
                     Err(err) => {
@@ -799,7 +796,11 @@ mod tests {
         // Both requests must still complete; placement failure must not
         // abort the run.
         assert_eq!(summary.completed_requests, requests.len());
-        assert!(hits.placement_errors >= 1, "expected at least one placement error, got {:?}", hits);
+        assert!(
+            hits.placement_errors >= 1,
+            "expected at least one placement error, got {:?}",
+            hits
+        );
     }
 
     /// A transfer model that always errors. Used to verify the fetch-error
@@ -845,7 +846,11 @@ mod tests {
             match path {
                 crate::transfer::TransferPath::LocalGpuToGpu
                 | crate::transfer::TransferPath::LocalCpuToGpu => {
-                    if bytes == 0 { Ok(1) } else { Ok(bytes) }
+                    if bytes == 0 {
+                        Ok(1)
+                    } else {
+                        Ok(bytes)
+                    }
                 }
                 _ => Err(crate::error::KvFlowError::InvalidTransferModel(
                     "always fail (test mock)".to_string(),
@@ -891,7 +896,11 @@ mod tests {
 
         assert_eq!(summary.completed_requests, requests.len());
         // The second turn's remote fetch must have failed and degraded.
-        assert!(hits.fetch_errors >= 1, "expected at least one fetch error, got {:?}", hits);
+        assert!(
+            hits.fetch_errors >= 1,
+            "expected at least one fetch error, got {:?}",
+            hits
+        );
         // The deferred-hit bookkeeping must agree: a failed fetch moves
         // the request from `pending_fetches` to `misses` and never
         // credits the hit counter. After the run, nothing should be

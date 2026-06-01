@@ -178,24 +178,54 @@ pub enum WorkerRole {
 
 ```rust
 pub trait TransferModel {
+    /// Stateful estimate. May advance internal queueing state
+    /// (e.g. `QueuedTransferModel::nic_busy_until_ns`). Use for real fetches.
     fn estimate(
         &mut self,
         now_ns: u64,
-        src: CacheLocation,
-        dst: CacheLocation,
+        path: TransferPath,
         bytes: u64,
-        priority: TransferPriority,
-    ) -> TransferEstimate;
+    ) -> Result<TransferEstimate>;
+
+    /// Stateless duration estimate. MUST NOT advance any internal state.
+    /// This is the right entry point for "what-if" scoring during
+    /// placement — calling `estimate` would pollute the model's state
+    /// (e.g. NIC busy time) for subsequent real fetches.
+    fn estimate_duration(
+        &self,
+        path: TransferPath,
+        bytes: u64,
+    ) -> Result<u64>;
 }
 
 pub struct TransferEstimate {
     pub start_ns: u64,
     pub finish_ns: u64,
-    pub queued_ns: u64,
-    pub effective_bw_bps: u64,
+    pub base_latency_ns: u64,
+    pub serialization_ns: u64,
+    pub bandwidth_bps: u64,
     pub path: TransferPath,
+    pub bytes: u64,
+}
+
+pub enum TransferPath {
+    LocalGpuToGpu,
+    LocalCpuToGpu,
+    RemoteMemoryToGpu,
+    RemoteSsdToGpu,
 }
 ```
+
+Implementations:
+
+- `AnalyticalTransferModel` — fixed bandwidth and base latency per path.
+  `estimate` and `estimate_duration` are equivalent (no internal state).
+- `QueuedTransferModel` — remote paths share a NIC busy time. `estimate`
+  advances `nic_busy_until_ns`; `estimate_duration` returns the
+  base + serialization latency without touching the busy time.
+- `TableCalibratedTransferModel` — table hit returns the stored
+  latency; miss falls back to the analytical model. Both `estimate`
+  and `estimate_duration` skip the table mutation.
 
 ## 4. Serving Events
 
@@ -272,6 +302,19 @@ Which prefill/decode worker should run the request?
 
 These should remain separate so experiments can swap one policy at a time.
 
+`NetworkAwarePlacement` scores each candidate tier by
+`utility = recompute_cost - fetch_cost - pressure_penalty` and tries them
+in descending order. Two correctness details:
+
+- **Capacity short-circuit**: before attempting LRU eviction on a tier,
+  if `cache.capacity(node, tier) < bytes` the policy skips the tier
+  without destroying its contents (LRU eviction is destructive, and
+  cannot recover from a tier that physically cannot hold the object).
+- **Stateless transfer cost**: tier scoring calls
+  `transfer.estimate_duration(...)`, not `transfer.estimate(...)`. The
+  latter would advance `QueuedTransferModel::nic_busy_until_ns` and
+  pollute the next real fetch's start time.
+
 ## 7. Metrics
 
 `ServingSummary` should include:
@@ -297,6 +340,26 @@ recompute_time_saved_ns
 evicted_kv_bytes
 prefetch_waste_bytes
 ```
+
+`CacheAwareRunner` additionally returns a `CacheHitStats` struct:
+
+```text
+hits_gpu        // immediate GPU hit, no fetch required
+hits_cpu        // deferred credit on FetchDone for a CPU hit
+hits_remote     // deferred credit on FetchDone for a remote (memory/SSD) hit
+misses          // true miss OR a fetch that degraded to a full prefill
+fetch_errors    // transfer estimate failed; the hit was *not* credited
+placement_errors // placement failed; the request still completed without caching
+pending_fetches // in-flight cache-to-GPU transfers at the snapshot moment
+```
+
+`hits_cpu` and `hits_remote` are credited only on `FetchDone`; until
+then a request is counted in `pending_fetches`. If the fetch fails
+(transfer-estimate error or unexpected cache location), the request
+moves from `pending_fetches` to `misses` and the hit is *not*
+credited. A single request contributes to exactly one of
+`{hits_remote, hits_cpu, misses}` — never two. `pending_fetches` must
+converge to 0 by the end of the run.
 
 ## 8. Configuration
 

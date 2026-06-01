@@ -88,11 +88,7 @@ impl QueuedTransferModel {
     /// placement scoring is called once per prefill completion and the
     /// runner then immediately calls `estimate` for the next real fetch,
     /// which would otherwise see a polluted start time.
-    pub fn estimate_duration(
-        &self,
-        path: TransferPath,
-        bytes: u64,
-    ) -> Result<u64> {
+    pub fn estimate_duration(&self, path: TransferPath, bytes: u64) -> Result<u64> {
         let (bandwidth_bps, base_latency_ns) = match path {
             TransferPath::LocalGpuToGpu => (self.local_gpu_bps, self.local_gpu_base_ns),
             TransferPath::LocalCpuToGpu => (self.local_cpu_bps, self.local_cpu_base_ns),
